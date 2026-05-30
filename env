@@ -1,0 +1,14 @@
+# Настройки базы данных
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=database
+DB_USER=postgres
+DB_PASSWORD=ineed_21U
+
+# API ключи
+YOUTUBE_API_KEY=AIzaSyBL-zKAqTfizpeKj-R2JE-kaFzGNytUNG4
+VK_TOKEN=10083be010083be010083be022133718c71100810083be079aef21eb53c3e5eefaab9fb
+
+# Настройки приложения
+DEBUG=True
+LOG_LEVEL=INFO
