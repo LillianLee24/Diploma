@@ -1,0 +1,493 @@
+-- ==========================================================
+-- BIG DATA АНАЛИТИКА СОЦИАЛЬНЫХ СЕТЕЙ
+-- Платформы: YouTube (полный VidIQ функционал) + VK
+-- Версия: 1.0
+-- ==========================================================
+
+-- ==========================================================
+-- 1. ТАБЛИЦА АККАУНТОВ (общая для всех платформ)
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS accounts (
+    id SERIAL PRIMARY KEY,
+    platform VARCHAR(20) NOT NULL, -- 'youtube', 'vk'
+    platform_id VARCHAR(100) NOT NULL,
+    username VARCHAR(255),
+    display_name VARCHAR(500),
+    description TEXT,
+    avatar_url TEXT,
+    profile_url TEXT,
+    
+    -- Основные метрики
+    followers_count BIGINT DEFAULT 0,
+    following_count INTEGER DEFAULT 0,
+    posts_count INTEGER DEFAULT 0,
+    
+    -- Временные метки
+    join_date TIMESTAMP,
+    last_seen TIMESTAMP,
+    first_collected TIMESTAMP DEFAULT NOW(),
+    last_updated TIMESTAMP DEFAULT NOW(),
+    
+    -- Статус
+    is_verified BOOLEAN DEFAULT FALSE,
+    is_active BOOLEAN DEFAULT TRUE,
+    is_private BOOLEAN DEFAULT FALSE,
+    
+    -- Дополнительные данные
+    metadata JSONB,
+    raw_data JSONB,
+    
+    UNIQUE(platform, platform_id)
+);
+
+-- Индексы для быстрого поиска
+CREATE INDEX IF NOT EXISTS idx_accounts_platform ON accounts(platform);
+CREATE INDEX IF NOT EXISTS idx_accounts_followers ON accounts(followers_count DESC);
+CREATE INDEX IF NOT EXISTS idx_accounts_updated ON accounts(last_updated DESC);
+
+-- ==========================================================
+-- 2. ТАБЛИЦА МЕТРИК АКТИВНОСТИ (временные ряды)
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS activity_metrics (
+    id BIGSERIAL PRIMARY KEY,
+    account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+    snapshot_date TIMESTAMP DEFAULT NOW(),
+    
+    -- Основные метрики
+    followers_count INTEGER DEFAULT 0,
+    following_count INTEGER DEFAULT 0,
+    posts_count INTEGER DEFAULT 0,
+    views_count BIGINT DEFAULT 0,
+    likes_count INTEGER DEFAULT 0,
+    comments_count INTEGER DEFAULT 0,
+    shares_count INTEGER DEFAULT 0,
+    
+    -- Производные метрики
+    engagement_rate DECIMAL(5,4) DEFAULT 0,
+    growth_rate DECIMAL(5,4) DEFAULT 0,
+    activity_score INTEGER DEFAULT 0,
+    
+    -- Качество данных
+    data_quality DECIMAL(3,2) DEFAULT 1.0,
+    collection_time_ms INTEGER,
+    
+    raw_data JSONB
+);
+
+-- Индексы
+CREATE INDEX IF NOT EXISTS idx_metrics_account_date ON activity_metrics(account_id, snapshot_date DESC);
+CREATE INDEX IF NOT EXISTS idx_metrics_date ON activity_metrics(snapshot_date);
+
+-- ==========================================================
+-- 3. ТАБЛИЦА ЛОГОВ СБОРА ДАННЫХ
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS collection_logs (
+    id BIGSERIAL PRIMARY KEY,
+    platform VARCHAR(20),
+    operation_type VARCHAR(50),
+    status VARCHAR(20),
+    items_collected INTEGER DEFAULT 0,
+    error_message TEXT,
+    api_calls_used INTEGER DEFAULT 0,
+    api_calls_remaining INTEGER DEFAULT 0,
+    started_at TIMESTAMP DEFAULT NOW(),
+    completed_at TIMESTAMP,
+    duration_seconds INTEGER,
+    metadata JSONB
+);
+
+-- Индексы
+CREATE INDEX IF NOT EXISTS idx_logs_status ON collection_logs(status, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_logs_platform ON collection_logs(platform, started_at DESC);
+
+-- ==========================================================
+-- 4. YOUTUBE КАНАЛЫ (ПОЛНЫЙ VIDIQ ФУНКЦИОНАЛ)
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS youtube_channels (
+    id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    
+    -- VidIQ метрики канала
+    channel_authority_score INTEGER DEFAULT 0, -- 0-100
+    daily_subscriber_growth INTEGER DEFAULT 0,
+    daily_view_growth BIGINT DEFAULT 0,
+    weekly_growth_rate DECIMAL(5,2),
+    monthly_growth_rate DECIMAL(5,2),
+    
+    -- Оценка доходов
+    estimated_monthly_views BIGINT DEFAULT 0,
+    estimated_monthly_revenue DECIMAL(10,2),
+    estimated_cpm DECIMAL(6,2),
+    estimated_rpm DECIMAL(6,2),
+    
+    -- VidIQ скоры
+    overall_score INTEGER DEFAULT 0,
+    seo_score INTEGER DEFAULT 0,
+    engagement_score INTEGER DEFAULT 0,
+    consistency_score INTEGER DEFAULT 0,
+    growth_score INTEGER DEFAULT 0,
+    thumbnail_score INTEGER DEFAULT 0,
+    title_score INTEGER DEFAULT 0,
+    tags_score INTEGER DEFAULT 0,
+    
+    -- Категории и тематики
+    primary_category VARCHAR(100),
+    secondary_categories TEXT[],
+    main_topics TEXT[],
+    main_keywords TEXT[],
+    
+    -- Качество видео
+    avg_upload_frequency INTEGER, -- дней между видео
+    avg_video_quality DECIMAL(3,2), -- 0-1
+    best_performing_category VARCHAR(100),
+    
+    -- Социальные ссылки
+    instagram_url TEXT,
+    twitter_url TEXT,
+    website_url TEXT,
+    
+    last_analyzed TIMESTAMP DEFAULT NOW()
+);
+
+-- ==========================================================
+-- 5. YOUTUBE ВИДЕО (ВСЕ МЕТРИКИ VIDIQ)
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS youtube_videos (
+    id BIGSERIAL PRIMARY KEY,
+    channel_id INTEGER REFERENCES youtube_channels(id) ON DELETE CASCADE,
+    video_id VARCHAR(50) UNIQUE NOT NULL,
+    
+    -- Основная информация
+    title VARCHAR(500) NOT NULL,
+    description TEXT,
+    published_at TIMESTAMP,
+    duration_seconds INTEGER,
+    category_id INTEGER,
+    category_name VARCHAR(100),
+    
+    -- Содержимое
+    tags TEXT[],
+    hashtags TEXT[],
+    mentions TEXT[],
+    cards_count INTEGER DEFAULT 0,
+    endscreens_count INTEGER DEFAULT 0,
+    
+    -- Основные метрики
+    view_count BIGINT DEFAULT 0,
+    like_count INTEGER DEFAULT 0,
+    comment_count INTEGER DEFAULT 0,
+    
+    -- VidIQ метрики вовлеченности
+    engagement_rate DECIMAL(6,4),
+    like_to_view_ratio DECIMAL(6,4),
+    comment_to_view_ratio DECIMAL(6,4),
+    
+    -- Метрики удержания
+    average_view_duration_seconds INTEGER,
+    average_view_duration_percentage DECIMAL(5,2),
+    retention_rate DECIMAL(5,2),
+    
+    -- VidIQ скоры для видео
+    seo_score INTEGER DEFAULT 0,
+    engagement_score INTEGER DEFAULT 0,
+    thumbnail_score INTEGER DEFAULT 0,
+    title_score INTEGER DEFAULT 0,
+    description_score INTEGER DEFAULT 0,
+    tags_score INTEGER DEFAULT 0,
+    overall_score INTEGER DEFAULT 0,
+    
+    -- Тренды
+    views_24h INTEGER DEFAULT 0,
+    views_7d INTEGER DEFAULT 0,
+    views_30d INTEGER DEFAULT 0,
+    velocity_score DECIMAL(10,4),
+    trending_score DECIMAL(10,4),
+    
+    -- Источники трафика (JSON для гибкости)
+    traffic_sources JSONB,
+    
+    -- Медиа
+    thumbnail_url TEXT,
+    
+    last_updated TIMESTAMP DEFAULT NOW(),
+    raw_data JSONB
+);
+
+-- Индексы для видео
+CREATE INDEX IF NOT EXISTS idx_videos_channel ON youtube_videos(channel_id, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_videos_views ON youtube_videos(view_count DESC);
+CREATE INDEX IF NOT EXISTS idx_videos_score ON youtube_videos(overall_score DESC);
+CREATE INDEX IF NOT EXISTS idx_videos_published ON youtube_videos(published_at DESC);
+
+-- ==========================================================
+-- 6. YOUTUBE КОММЕНТАРИИ С АНАЛИТИКОЙ
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS youtube_comments (
+    id BIGSERIAL PRIMARY KEY,
+    video_id BIGINT REFERENCES youtube_videos(id) ON DELETE CASCADE,
+    comment_id VARCHAR(100) UNIQUE NOT NULL,
+    
+    author_name VARCHAR(255),
+    author_id VARCHAR(100),
+    author_channel_url TEXT,
+    
+    comment_text TEXT,
+    published_at TIMESTAMP,
+    like_count INTEGER DEFAULT 0,
+    reply_count INTEGER DEFAULT 0,
+    
+    -- Аналитика комментария
+    sentiment_score DECIMAL(4,3), -- -1 до 1
+    toxicity_score DECIMAL(4,3), -- 0 до 1
+    spam_probability DECIMAL(4,3),
+    is_pinned BOOLEAN DEFAULT FALSE,
+    
+    -- Ответы (если есть)
+    parent_comment_id VARCHAR(100),
+    
+    collected_at TIMESTAMP DEFAULT NOW(),
+    raw_data JSONB
+);
+
+-- Индексы для комментариев
+CREATE INDEX IF NOT EXISTS idx_comments_video ON youtube_comments(video_id);
+CREATE INDEX IF NOT EXISTS idx_comments_sentiment ON youtube_comments(sentiment_score);
+
+-- ==========================================================
+-- 7. YOUTUBE КЛЮЧЕВЫЕ СЛОВА (VIDIQ KEYWORD TOOL)
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS youtube_keywords (
+    id BIGSERIAL PRIMARY KEY,
+    keyword VARCHAR(255) NOT NULL,
+    search_date DATE NOT NULL,
+    
+    -- Основные метрики
+    search_volume INTEGER DEFAULT 0,
+    competition_level VARCHAR(20), -- 'low', 'medium', 'high'
+    competition_index DECIMAL(5,4), -- 0-1
+    
+    -- VidIQ метрики
+    keyword_difficulty INTEGER DEFAULT 0, -- 0-100
+    overall_score INTEGER DEFAULT 0, -- 0-100
+    trend_direction VARCHAR(20), -- 'up', 'down', 'stable'
+    growth_rate DECIMAL(10,4),
+    
+    -- Контент по ключевому слову
+    top_videos_ids TEXT[],
+    top_channels_ids TEXT[],
+    avg_views_top10 BIGINT,
+    avg_likes_top10 INTEGER,
+    avg_comments_top10 INTEGER,
+    
+    -- Связанные ключевые слова
+    related_keywords TEXT[],
+    long_tail_keywords TEXT[],
+    questions TEXT[], -- вопросы пользователей
+    
+    -- CPC и реклама (если доступно)
+    estimated_cpc DECIMAL(6,2),
+    competition_level_adwords VARCHAR(20),
+    
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(keyword, search_date)
+);
+
+-- Индексы для ключевых слов
+CREATE INDEX IF NOT EXISTS idx_keywords_keyword ON youtube_keywords(keyword);
+CREATE INDEX IF NOT EXISTS idx_keywords_date ON youtube_keywords(search_date DESC);
+CREATE INDEX IF NOT EXISTS idx_keywords_volume ON youtube_keywords(search_volume DESC);
+CREATE INDEX IF NOT EXISTS idx_keywords_difficulty ON youtube_keywords(keyword_difficulty);
+
+-- ==========================================================
+-- 8. VK ПОЛЬЗОВАТЕЛИ
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS vk_users (
+    id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    
+    -- VK специфичные поля
+    first_name VARCHAR(255),
+    last_name VARCHAR(255),
+    maiden_name VARCHAR(255),
+    sex INTEGER, -- 1 - жен, 2 - муж
+    birth_date DATE,
+    city VARCHAR(255),
+    country VARCHAR(255),
+    home_town VARCHAR(255),
+    phone VARCHAR(50),
+    
+    -- Статусы
+    status TEXT,
+    activity VARCHAR(255),
+    occupation JSONB,
+    
+    -- Образование
+    education JSONB,
+    
+    -- Семейное положение
+    relation INTEGER,
+    relation_partner JSONB,
+    
+    -- Личные настройки
+    personal JSONB,
+    interests TEXT,
+    music TEXT,
+    movies TEXT,
+    books TEXT,
+    games TEXT,
+    about TEXT,
+    
+    -- Счетчики
+    friends_count INTEGER DEFAULT 0,
+    followers_count INTEGER DEFAULT 0,
+    groups_count INTEGER DEFAULT 0,
+    photos_count INTEGER DEFAULT 0,
+    videos_count INTEGER DEFAULT 0,
+    audios_count INTEGER DEFAULT 0,
+    
+    -- Онлайн статус
+    online BOOLEAN DEFAULT FALSE,
+    last_seen_online TIMESTAMP,
+    online_mobile BOOLEAN DEFAULT FALSE,
+    
+    last_analyzed TIMESTAMP DEFAULT NOW()
+);
+
+-- ==========================================================
+-- 9. VK ПОСТЫ
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS vk_posts (
+    id BIGSERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES vk_users(id) ON DELETE CASCADE,
+    post_id VARCHAR(100) UNIQUE NOT NULL,
+    
+    -- Содержимое
+    text TEXT,
+    created_at TIMESTAMP,
+    
+    -- Метрики
+    likes_count INTEGER DEFAULT 0,
+    comments_count INTEGER DEFAULT 0,
+    reposts_count INTEGER DEFAULT 0,
+    views_count INTEGER DEFAULT 0,
+    
+    -- Медиа
+    attachments JSONB,
+    photos_count INTEGER DEFAULT 0,
+    videos_count INTEGER DEFAULT 0,
+    links_count INTEGER DEFAULT 0,
+    
+    -- Геолокация
+    geo JSONB,
+    
+    -- Аналитика
+    sentiment_score DECIMAL(4,3),
+    toxicity_score DECIMAL(4,3),
+    
+    collected_at TIMESTAMP DEFAULT NOW(),
+    raw_data JSONB
+);
+
+-- Индексы для VK постов
+CREATE INDEX IF NOT EXISTS idx_vk_posts_user ON vk_posts(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_vk_posts_likes ON vk_posts(likes_count DESC);
+
+-- ==========================================================
+-- 10. ТЕСТОВЫЕ ДАННЫЕ
+-- ==========================================================
+
+-- Добавляем тестовый аккаунт YouTube (Linus Tech Tips)
+INSERT INTO accounts (platform, platform_id, username, display_name, description, followers_count, posts_count, join_date, is_verified) 
+VALUES (
+    'youtube', 
+    'UCXuqSBlHAE6Xw-yeJA0Tunw', 
+    'LinusTechTips', 
+    'Linus Tech Tips', 
+    'Tech reviews and tutorials - Your trusted source for technology reviews, news, and guides.',
+    15000000, 
+    5000, 
+    '2008-01-01',
+    TRUE
+) ON CONFLICT (platform, platform_id) DO NOTHING;
+
+-- Добавляем данные в youtube_channels для этого канала
+INSERT INTO youtube_channels (
+    id, 
+    channel_authority_score, 
+    overall_score, 
+    seo_score, 
+    engagement_score,
+    estimated_monthly_views,
+    estimated_monthly_revenue,
+    primary_category
+)
+VALUES (
+    (SELECT id FROM accounts WHERE platform='youtube' AND platform_id='UCXuqSBlHAE6Xw-yeJA0Tunw'),
+    95,
+    92,
+    90,
+    94,
+    50000000,
+    100000.00,
+    'Technology'
+) ON CONFLICT (id) DO NOTHING;
+
+-- Добавляем тестовый аккаунт VK (Павел Дуров)
+INSERT INTO accounts (platform, platform_id, username, display_name, description, followers_count, following_count, posts_count, join_date, is_verified) 
+VALUES (
+    'vk', 
+    '1', 
+    'durov', 
+    'Павел Дуров', 
+    'Создатель Telegram и ВКонтакте',
+    2500000, 
+    100, 
+    150, 
+    '2006-10-10',
+    TRUE
+) ON CONFLICT (platform, platform_id) DO NOTHING;
+
+-- Добавляем данные в vk_users
+INSERT INTO vk_users (
+    id,
+    first_name,
+    last_name,
+    sex,
+    city,
+    country,
+    followers_count,
+    friends_count,
+    online
+)
+VALUES (
+    (SELECT id FROM accounts WHERE platform='vk' AND platform_id='1'),
+    'Павел',
+    'Дуров',
+    2,
+    'Санкт-Петербург',
+    'Россия',
+    2500000,
+    100,
+    FALSE
+) ON CONFLICT (id) DO NOTHING;
+
+-- Добавляем тестовые ключевые слова
+INSERT INTO youtube_keywords (keyword, search_date, search_volume, competition_level, overall_score, trend_direction)
+VALUES 
+    ('python programming', CURRENT_DATE, 450000, 'high', 85, 'up'),
+    ('machine learning', CURRENT_DATE, 320000, 'high', 90, 'up'),
+    ('web development', CURRENT_DATE, 280000, 'medium', 75, 'stable'),
+    ('data science', CURRENT_DATE, 210000, 'medium', 80, 'up'),
+    ('artificial intelligence', CURRENT_DATE, 180000, 'high', 88, 'up'),
+    ('javascript tutorial', CURRENT_DATE, 150000, 'medium', 70, 'down'),
+    ('react js', CURRENT_DATE, 120000, 'medium', 72, 'stable'),
+    ('python for beginners', CURRENT_DATE, 98000, 'low', 65, 'up'),
+    ('coding interview', CURRENT_DATE, 75000, 'low', 60, 'up'),
+    ('software engineering', CURRENT_DATE, 62000, 'low', 55, 'stable')
+ON CONFLICT (keyword, search_date) DO NOTHING;
+
+-- Проверка создания таблиц
+SELECT 
+    table_name, 
+    table_type 
+FROM information_schema.tables 
+WHERE table_schema = 'public' 
+ORDER BY table_name;
